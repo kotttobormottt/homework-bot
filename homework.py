@@ -125,6 +125,7 @@ def check_tokens() -> bool:
         logger.critical(error_message)
         return False
 
+
 def main():
     """Основная логика работы бота."""
     logger.debug("Бот запущен")
@@ -141,7 +142,6 @@ def main():
                 message = parse_status(hw)
                 send_message(bot, message)
             current_timestamp = int(response["current_date"])
-
         except Exception as error:
             error_message = f' Сбой в работе программы: {error}'
             logger.error(error_message)
