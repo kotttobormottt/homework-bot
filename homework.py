@@ -30,6 +30,7 @@ HOMEWORK_STATUSES = {
 
 logger = logging.getLogger(__name__)
 
+
 def send_message(bot: telegram.Bot, message: str):
     """Отправляет сообщения пользователю."""
     try:
