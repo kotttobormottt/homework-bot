@@ -51,7 +51,8 @@ def get_api_answer(current_timestamp: int = 0) -> Dict:
         )
     except requests.RequestException as err:
         raise exceptions.APIRequestException(
-            f'Ошибка {err} при получении ответа: {ENDPOINT}, {HEADERS}, {params}'
+            f'Ошибка {err} при получении ответа: '
+            f'{ENDPOINT}, {HEADERS}, {params}'
         )
     if homework_statuses.status_code != requests.codes.ok:
         raise exceptions.APIStatusCodeException(
@@ -135,10 +136,10 @@ def main():
 
 if __name__ == '__main__':
     logging.basicConfig(
-    level=logging.DEBUG,
-    filename='program.log',
-    filemode='w',
-    format='%(asctime)s - %(levelname)s - %(message)s - %(name)s'
+        level=logging.DEBUG,
+        filename='program.log',
+        filemode='w',
+        format='%(asctime)s - %(levelname)s - %(message)s - %(name)s'
     )
     logger.addHandler(logging.StreamHandler())
     main()
