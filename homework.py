@@ -8,7 +8,7 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
-from exceptions import HomeworkStatusException
+import exceptions
 
 load_dotenv()
 
@@ -28,27 +28,15 @@ HOMEWORK_STATUSES = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    filename='program.log',
-    filemode='w',
-    format='%(asctime)s - %(levelname)s - %(message)s - %(name)s'
-)
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler())
-
 
 def send_message(bot: telegram.Bot, message: str):
     """Отправляет сообщения пользователю."""
     try:
-        post_message = bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID, text=message
-        )
+        bot.send_message(TELEGRAM_CHAT_ID, message)
         logger.info(f'Бот отправил сообщение "{message}"')
-        return post_message
-    except telegram.error.TelegramError as e:
-        logger.error(e)
-        raise e
+    except telegram.error.TelegramError:
+        raise exceptions.MessageNotSendedException('Сообщение не отправлено')
 
 
 def get_api_answer(current_timestamp: int = 0) -> Dict:
@@ -61,69 +49,52 @@ def get_api_answer(current_timestamp: int = 0) -> Dict:
             headers=HEADERS,
             params=params
         )
-    except ConnectionError as e:
-        logger.error(e)
-        raise e
+    except requests.RequestException as err:
+        raise exceptions.APIRequestException(
+            f'Ошибка {err} при получении ответа: {ENDPOINT}, {HEADERS}, {params}'
+        )
     if homework_statuses.status_code != requests.codes.ok:
-        homework_statuses.raise_for_status()
-    try:
-        result = homework_statuses.json()
-    except requests.exceptions.JSONDecodeError as e:
-        logger.error(e)
-        raise e
-    return result
+        raise exceptions.APIStatusCodeException(
+            f'Ответ сервера {homework_statuses.status_code}'
+        )
+    logger.info('Ответ получен')
+    homework = homework_statuses.json()
+    if ('error' or 'code') in homework:
+        raise exceptions.WrongAPIAnswerException('Ошибка json')
+    return homework
 
 
 def check_response(response: Dict) -> List:
     """Проверяет ответ API на корректность."""
-    try:
-        homeworks = response["homeworks"]
-        response["current_date"]
-    except KeyError as e:
-        logger.error(e)
-        raise e
-    except TypeError as e:
-        logger.error("Ответ от API пришёл не в виде словаря.")
-        raise e
+    if not isinstance(response, dict):
+        raise TypeError('Не словарь')
+    if response.get('current_date') is None:
+        raise KeyError('Отсутствует current_date')
     homeworks = response["homeworks"]
     if not isinstance(homeworks, list):
-        raise TypeError
-    if homeworks == []:
-        logger.debug("Новые статусы отсутствуют")
+        raise TypeError('Не список')
     return homeworks
 
 
 def parse_status(homework: Dict[str, str]) -> str:
     """Извлекает из информации о  домашней работе."""
-    try:
-        homework_name = homework["homework_name"]
-        homework_status = homework["status"]
-    except KeyError as e:
-        logger.error(e)
-        raise e
-    if homework_status not in HOMEWORK_STATUSES:
-        logger.error("Получен неизвестный статус домашней работы")
-        raise HomeworkStatusException
+    homework_name = homework['homework_name']
+    if homework_name is None:
+        raise KeyError('Домашняя работа не найдена')
+    homework_status = homework['status']
+    if not homework_status:
+        raise KeyError('Статус домашней работы не найден')
     verdict = HOMEWORK_STATUSES[homework_status]
+    if verdict is None:
+        raise exceptions.HomeworkStatusException(
+            'Вердикт по домашней работе не нвйден'
+        )
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def check_tokens() -> bool:
     """Проверяет наличие обязательных переменных окружения."""
-    if PRACTICUM_TOKEN and TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-        return True
-    else:
-        error_message = (
-            "Отсутствует(ют) обязательная(ые) переменная(ые) окружения: "
-        )
-        if not PRACTICUM_TOKEN:
-            error_message += 'PRACTICUM_TOKEN '
-        if not TELEGRAM_TOKEN:
-            error_message += 'TELEGRAM_TOKEN '
-        if not TELEGRAM_CHAT_ID:
-            error_message += 'TELEGRAM_CHAT_ID'
-        logger.critical(error_message)
-        return False
+    return all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PRACTICUM_TOKEN])
 
 
 def main():
@@ -134,22 +105,40 @@ def main():
         sys.exit("Прервать: Отсутствуют переменные окружения")
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
+    current_status = None
+    last_message = None
     while True:
         try:
             response = get_api_answer(current_timestamp)
             homeworks: List = check_response(response)
-            for hw in homeworks:
-                message = parse_status(hw)
+            if len(homeworks) == 0:
+                logger.info('Список проверенных ДЗ пуст')
+                continue
+            homework_status = homeworks[0].get('status')
+            message = parse_status(homeworks[0])
+            if homework_status != current_status:
+                current_status = homework_status
+                logger.info(message)
                 send_message(bot, message)
-            current_timestamp = int(response["current_date"])
-        except Exception as error:
-            error_message = f' Сбой в работе программы: {error}'
-            logger.error(error_message)
-            send_message(bot, error_message)
+            logger.debug('Статус не изменился')
+        except exceptions.MessageNotSendedException as bot_err:
+            logger.error(f'Сбой при отправке сообщения: {bot_err}')
+        except Exception as err:
+            message = f'Сбой при работе в программе: {err}'
+            logger.error(message)
+            if last_message != message:
+                send_message(bot, message)
+                last_message = message
         finally:
-            logger.info(f'Следующая проверка через {RETRY_TIME/60} минут')
             time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+    level=logging.DEBUG,
+    filename='program.log',
+    filemode='w',
+    format='%(asctime)s - %(levelname)s - %(message)s - %(name)s'
+    )
+    logger.addHandler(logging.StreamHandler())
     main()
