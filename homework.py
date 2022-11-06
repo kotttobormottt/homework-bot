@@ -80,13 +80,13 @@ def check_response(response: Dict) -> List:
 
 def parse_status(homework: Dict[str, str]) -> str:
     """Извлекает из информации о  домашней работе."""
-    homework_name = homework['homework_name']
+    homework_name = homework.get('homework_name')
     if homework_name is None:
         raise KeyError('Домашняя работа не найдена')
-    homework_status = homework['status']
+    homework_status = homework.get('status')
     if not homework_status:
         raise KeyError('Статус домашней работы не найден')
-    verdict = HOMEWORK_STATUSES[homework_status]
+    verdict = HOMEWORK_STATUSES.get(homework_status)
     if verdict is None:
         raise exceptions.HomeworkStatusException(
             'Вердикт по домашней работе не нвйден'
